@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="48" fill="#5b8def"/>
+  <text x="128" y="170" font-family="Sans" font-size="120"
+        font-weight="700" fill="white" text-anchor="middle">LC</text>
+</svg>

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Linclear
+GenericName=Application Uninstaller
+Comment=Uninstall apps and clean leftover files on Linux
+Exec=linclear
+Icon=linclear
+Terminal=false
+Categories=System;Utility;PackageManager;
+Keywords=uninstall;clean;remove;package;apt;dnf;snap;flatpak;linclear;
+StartupNotify=true
