@@ -2,10 +2,10 @@
 
 A simple, fast, and lightweight system cleaner for Linux, written in Python. **Linclear** is designed to help you easily manage, detect, and clean application data across your system. It is optimized primarily for **Ubuntu**, **Fedora**, and their derivatives (Linux Mint, Pop!_OS, Nobara, etc.).
 
-![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-v1.1.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange.svg)
 
-## ✨ Features (v1.0.0)
+## ✨ Features (v1.1.0)
 
 * **Multi-Format Application Detection:** Scans and identifies applications installed via:
   * **DEB** (Debian / Ubuntu package manager)
