@@ -2,10 +2,10 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QLineEdit,
     QComboBox, QListWidget, QListWidgetItem, QLabel, QPushButton,
     QPlainTextEdit, QProgressBar, QToolBar, QMessageBox, QInputDialog,
-    QFormLayout, QGroupBox, QApplication,
+    QFormLayout, QGroupBox, QApplication, QStyledItemDelegate, QStyle,
 )
-from PyQt6.QtCore import Qt, QSettings, QThread, pyqtSignal
-from PyQt6.QtGui import QAction
+from PyQt6.QtCore import Qt, QSettings, QThread, pyqtSignal, QSize, QRect
+from PyQt6.QtGui import QAction, QFont, QColor
 
 from .. import __version__
 from ..models import AppInfo
@@ -18,6 +18,117 @@ from .leftovers_dialog import LeftoversDialog
 from .settings_dialog import SettingsDialog
 
 
+# ---------------------------------------------------------------- delegate --
+class AppRowDelegate(QStyledItemDelegate):
+    """Render each row in fixed structured columns:
+    [ Name (flex) ] [ Badge (70px) ] [ Version (150px) ] [ Size (75px) ]
+    """
+
+    SOURCE_COLORS = {
+        "RPM":     "#c9624a",
+        "DEB":     "#a83a56",
+        "Snap":    "#b5651d",
+        "Flatpak": "#4a7ec9",
+        "Manual":  "#6a8c6a",
+    }
+
+    def sizeHint(self, option, index):
+        return QSize(option.rect.width(), 36)
+
+    def paint(self, painter, option, index):
+        app = index.data(Qt.ItemDataRole.UserRole)
+        if app is None:
+            super().paint(painter, option, index)
+            return
+
+        painter.save()
+
+        # Selection state styling
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+            name_color = option.palette.highlightedText().color()
+            meta_color = name_color
+        else:
+            name_color = option.palette.text().color()
+            meta_color = QColor(name_color)
+            meta_color.setAlpha(160)
+
+        rect = option.rect.adjusted(10, 0, -10, 0)
+        cy = rect.center().y()
+
+        # Defined column layout bounds from right to left
+        SIZE_WIDTH = 75
+        VERSION_WIDTH = 150
+        BADGE_WIDTH = 68
+        SPACING = 12
+
+        size_x = rect.right() - SIZE_WIDTH
+        ver_x = size_x - SPACING - VERSION_WIDTH
+        badge_x = ver_x - SPACING - BADGE_WIDTH
+        name_max_w = badge_x - SPACING - rect.left()
+
+        # Font setup for metadata
+        meta_font = QFont(option.font)
+        meta_font.setPointSizeF(option.font.pointSizeF() - 0.5)
+        painter.setFont(meta_font)
+
+        # 1. Size column (far right)
+        if app.size_bytes:
+            size_rect = QRect(size_x, rect.top(), SIZE_WIDTH, rect.height())
+            painter.setPen(meta_color)
+            painter.drawText(
+                size_rect,
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                app.size_human
+            )
+
+        # 2. Version column (fixed width with elision)
+        if app.version:
+            ver_rect = QRect(ver_x, rect.top(), VERSION_WIDTH, rect.height())
+            painter.setPen(meta_color)
+            elided_ver = painter.fontMetrics().elidedText(
+                app.version, Qt.TextElideMode.ElideRight, VERSION_WIDTH
+            )
+            painter.drawText(
+                ver_rect,
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                elided_ver
+            )
+
+        # 3. Source Badge column (fixed width badge)
+        badge_rect = QRect(badge_x, cy - 10, BADGE_WIDTH, 20)
+        badge_color = QColor(self.SOURCE_COLORS.get(app.source, "#888888"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(badge_color)
+        painter.drawRoundedRect(badge_rect, 4, 4)
+
+        badge_font = QFont(option.font)
+        badge_font.setPointSizeF(option.font.pointSizeF() - 1.5)
+        badge_font.setBold(True)
+        painter.setFont(badge_font)
+        painter.setPen(QColor("white"))
+        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, app.source)
+
+        # 4. App Name column (fills remaining left space, bold, elided)
+        if name_max_w > 30:
+            name_rect = QRect(rect.left(), rect.top(), name_max_w, rect.height())
+            name_font = QFont(option.font)
+            name_font.setBold(True)
+            painter.setFont(name_font)
+            painter.setPen(name_color)
+            elided_name = painter.fontMetrics().elidedText(
+                app.name, Qt.TextElideMode.ElideRight, name_rect.width()
+            )
+            painter.drawText(
+                name_rect,
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                elided_name
+            )
+
+        painter.restore()
+
+
+# ----------------------------------------------------------- leftover worker --
 class LeftoverWorker(QThread):
     output = pyqtSignal(str)
     done   = pyqtSignal(list)
@@ -35,6 +146,7 @@ class LeftoverWorker(QThread):
         self.done.emit(items)
 
 
+# --------------------------------------------------------------- main window --
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -46,15 +158,17 @@ class MainWindow(QMainWindow):
         self.apps: list[AppInfo] = []
         self.current: AppInfo | None = None
         self._worker = None
+        self._lw = None
 
         self._build_ui()
         self._apply_settings()
         self.log(f"Linclear {__version__} starting…")
         self.refresh()
 
-    # ------- UI construction -------
+    # ------------------------------------------------------------- UI setup --
     def _build_ui(self):
-        tb = QToolBar("Main"); tb.setMovable(False)
+        tb = QToolBar("Main")
+        tb.setMovable(False)
         self.addToolBar(tb)
 
         self.act_refresh = QAction("Refresh", self)
@@ -79,16 +193,20 @@ class MainWindow(QMainWindow):
         self.act_about.triggered.connect(self.about)
         tb.addAction(self.act_about)
 
-        central = QWidget(); self.setCentralWidget(central)
+        central = QWidget()
+        self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter, 1)
 
-        # left pane
-        left = QWidget(); ll = QVBoxLayout(left)
+        # -------------------- left pane --------------------
+        left = QWidget()
+        ll = QVBoxLayout(left)
         ll.setContentsMargins(8, 8, 8, 8)
-        self.search = QLineEdit(); self.search.setPlaceholderText("Search apps…")
+
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search apps…")
         self.search.textChanged.connect(self._refilter)
         ll.addWidget(self.search)
 
@@ -99,25 +217,50 @@ class MainWindow(QMainWindow):
         self.source_filter.currentIndexChanged.connect(self._refilter)
         ll.addWidget(self.source_filter)
 
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems([
+            "Name (A → Z)",
+            "Name (Z → A)",
+            "Size (largest → smallest)",
+            "Size (smallest → largest)",
+            "Source, then name",
+        ])
+        self.sort_combo.currentIndexChanged.connect(self._refilter)
+        ll.addWidget(self.sort_combo)
+
         self.list = QListWidget()
+        self.list.setItemDelegate(AppRowDelegate(self.list))
+        self.list.setUniformItemSizes(True)
+        self.list.setSpacing(0)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.list.currentItemChanged.connect(self._on_select)
         ll.addWidget(self.list, 1)
-        self.count_label = QLabel("0 apps"); self.count_label.setObjectName("subtitle")
+
+        self.count_label = QLabel("0 apps")
+        self.count_label.setObjectName("subtitle")
         ll.addWidget(self.count_label)
         splitter.addWidget(left)
 
-        # right pane
-        right = QWidget(); rl = QVBoxLayout(right)
+        # -------------------- right pane --------------------
+        right = QWidget()
+        rl = QVBoxLayout(right)
         rl.setContentsMargins(8, 8, 8, 8)
+
         self.title_label = QLabel("Select an application")
-        self.title_label.setObjectName("title"); self.title_label.setWordWrap(True)
+        self.title_label.setObjectName("title")
+        self.title_label.setWordWrap(True)
         rl.addWidget(self.title_label)
 
-        box = QGroupBox("Details"); form = QFormLayout(box)
-        self.d_name    = QLabel("—"); self.d_version = QLabel("—")
-        self.d_source  = QLabel("—"); self.d_size    = QLabel("—")
-        self.d_path    = QLabel("—"); self.d_path.setWordWrap(True)
-        self.d_desc    = QLabel("—"); self.d_desc.setWordWrap(True)
+        box = QGroupBox("Details")
+        form = QFormLayout(box)
+        self.d_name    = QLabel("—")
+        self.d_version = QLabel("—")
+        self.d_source  = QLabel("—")
+        self.d_size    = QLabel("—")
+        self.d_path    = QLabel("—")
+        self.d_path.setWordWrap(True)
+        self.d_desc    = QLabel("—")
+        self.d_desc.setWordWrap(True)
         form.addRow("Name:", self.d_name)
         form.addRow("Version:", self.d_version)
         form.addRow("Source:", self.d_source)
@@ -141,17 +284,20 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
 
-        # log
-        log_box = QGroupBox("Log"); ll2 = QVBoxLayout(log_box)
-        self.log_view = QPlainTextEdit(); self.log_view.setReadOnly(True)
+        # -------------------- log --------------------
+        log_box = QGroupBox("Log")
+        ll2 = QVBoxLayout(log_box)
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(5000)
         ll2.addWidget(self.log_view)
         self.progress = QProgressBar()
-        self.progress.setRange(0, 0); self.progress.setVisible(False)
+        self.progress.setRange(0, 0)
+        self.progress.setVisible(False)
         ll2.addWidget(self.progress)
         root.addWidget(log_box, 0)
 
-    # ------- small helpers -------
+    # ------------------------------------------------------------- helpers --
     def log(self, msg: str):
         self.log_view.appendPlainText(msg)
 
@@ -166,7 +312,7 @@ class MainWindow(QMainWindow):
         theme = self.settings.value("theme", "Dark")
         apply_theme(QApplication.instance(), dark=(theme != "Light"))
 
-    # ------- listing -------
+    # ------------------------------------------------------------- listing --
     def refresh(self):
         self.log("[refresh] enumerating installed apps…")
         self._busy(True)
@@ -177,7 +323,7 @@ class MainWindow(QMainWindow):
 
     def _on_apps(self, apps):
         self._busy(False)
-        self.apps = sorted(apps, key=lambda a: (a.source, a.name.lower()))
+        self.apps = list(apps)
         self._refilter()
         self.log(f"[refresh] {len(self.apps)} apps total")
 
@@ -185,8 +331,8 @@ class MainWindow(QMainWindow):
         text = self.search.text().lower().strip()
         src = self.source_filter.currentText()
         show_manual = self.settings.value("show_manual", True, type=bool)
-        self.list.clear()
-        shown = 0
+
+        visible = []
         for a in self.apps:
             if src != "All sources" and a.source != src:
                 continue
@@ -194,11 +340,32 @@ class MainWindow(QMainWindow):
                 continue
             if text and text not in a.name.lower() and text not in a.package_id.lower():
                 continue
-            item = QListWidgetItem(f"{a.name}   ·  {a.source}  ·  {a.version or '—'}")
+            visible.append(a)
+
+        visible.sort(key=self._sort_key())
+
+        self.list.clear()
+        for a in visible:
+            item = QListWidgetItem(a.name)
             item.setData(Qt.ItemDataRole.UserRole, a)
+            item.setSizeHint(QSize(0, 36))
             self.list.addItem(item)
-            shown += 1
-        self.count_label.setText(f"{shown} of {len(self.apps)} apps")
+
+        self.count_label.setText(f"{len(visible)} of {len(self.apps)} apps")
+
+    def _sort_key(self):
+        mode = self.sort_combo.currentText()
+        if mode == "Name (A → Z)":
+            return lambda a: (0, a.name.lower())
+        if mode == "Name (Z → A)":
+            return lambda a: (0, tuple(-ord(c) for c in a.name.lower()))
+        if mode == "Size (largest → smallest)":
+            return lambda a: (0, -(a.size_bytes or 0), a.name.lower())
+        if mode == "Size (smallest → largest)":
+            return lambda a: (0, (a.size_bytes or 0), a.name.lower())
+        if mode == "Source, then name":
+            return lambda a: (0, a.source.lower(), a.name.lower())
+        return lambda a: (0, a.name.lower())
 
     def _on_select(self, cur, _prev):
         if cur is None:
@@ -214,7 +381,7 @@ class MainWindow(QMainWindow):
         self.d_path.setText(a.install_path or "—")
         self.d_desc.setText(a.description or "—")
 
-    # ------- uninstall -------
+    # ----------------------------------------------------------- uninstall --
     def uninstall_selected(self):
         a = self.current
         if not a:
@@ -283,7 +450,7 @@ class MainWindow(QMainWindow):
             self.current = target
             self.scan_leftovers_for_selected()
 
-    # ------- leftovers -------
+    # ----------------------------------------------------------- leftovers --
     def scan_leftovers_for_selected(self):
         a = self.current
         if not a:
@@ -308,7 +475,7 @@ class MainWindow(QMainWindow):
             dry_run=self.settings.value("dry_run", False, type=bool))
         dlg.exec()
 
-    # ------- settings / about -------
+    # ------------------------------------------------------------ settings --
     def open_settings(self):
         dlg = SettingsDialog(self)
         if dlg.exec():
@@ -323,4 +490,6 @@ class MainWindow(QMainWindow):
             f"<h3>Linclear {__version__}</h3>"
             "<p>A universal Linux application uninstaller and system cleaner.</p>"
             "<p>Supports RPM, DEB, Snap, Flatpak, and manually-installed apps.</p>"
+            "<p><b>Created by Saimueli</b><br>"
+            "<a href='https://github.com/Saimueli'>github.com/Saimueli</a></p>"
             "<p>MIT Licensed.</p>")
