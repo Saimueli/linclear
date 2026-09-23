@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, QSettings, QThread, pyqtSignal, QSize, QRect
 from PyQt6.QtGui import QAction, QFont, QColor
 
 from .. import __version__
-from ..models import AppInfo
+from ..models import AppInfo, CAT_APP, CAT_LIB, CAT_SYS
 from ..worker import ListAppsWorker, CommandWorker
 from ..backends import get_backends
 from .. import safety
@@ -16,20 +16,20 @@ from ..cleanup import scan_leftovers
 from .theme import apply_theme
 from .leftovers_dialog import LeftoversDialog
 from .settings_dialog import SettingsDialog
+from .appimage_dialog import AppImageFinderDialog
 
 
 # ---------------------------------------------------------------- delegate --
 class AppRowDelegate(QStyledItemDelegate):
-    """Render each row in fixed structured columns:
-    [ Name (flex) ] [ Badge (70px) ] [ Version (150px) ] [ Size (75px) ]
-    """
-
     SOURCE_COLORS = {
-        "RPM":     "#c9624a",
-        "DEB":     "#a83a56",
-        "Snap":    "#b5651d",
-        "Flatpak": "#4a7ec9",
-        "Manual":  "#6a8c6a",
+        "RPM":      "#c9624a",
+        "DEB":      "#a83a56",
+        "Pacman":   "#1793d1",
+        "Snap":     "#b5651d",
+        "Flatpak":  "#4a7ec9",
+        "Nix":      "#5277c3",
+        "Manual":   "#6a8c6a",
+        "AppImage": "#8a6fc9",
     }
 
     def sizeHint(self, option, index):
@@ -43,7 +43,6 @@ class AppRowDelegate(QStyledItemDelegate):
 
         painter.save()
 
-        # Selection state styling
         if option.state & QStyle.StateFlag.State_Selected:
             painter.fillRect(option.rect, option.palette.highlight())
             name_color = option.palette.highlightedText().color()
@@ -56,7 +55,6 @@ class AppRowDelegate(QStyledItemDelegate):
         rect = option.rect.adjusted(10, 0, -10, 0)
         cy = rect.center().y()
 
-        # Defined column layout bounds from right to left
         SIZE_WIDTH = 75
         VERSION_WIDTH = 150
         BADGE_WIDTH = 68
@@ -67,35 +65,28 @@ class AppRowDelegate(QStyledItemDelegate):
         badge_x = ver_x - SPACING - BADGE_WIDTH
         name_max_w = badge_x - SPACING - rect.left()
 
-        # Font setup for metadata
         meta_font = QFont(option.font)
         meta_font.setPointSizeF(option.font.pointSizeF() - 0.5)
         painter.setFont(meta_font)
 
-        # 1. Size column (far right)
         if app.size_bytes:
             size_rect = QRect(size_x, rect.top(), SIZE_WIDTH, rect.height())
             painter.setPen(meta_color)
             painter.drawText(
                 size_rect,
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
-                app.size_human
-            )
+                app.size_human)
 
-        # 2. Version column (fixed width with elision)
         if app.version:
             ver_rect = QRect(ver_x, rect.top(), VERSION_WIDTH, rect.height())
             painter.setPen(meta_color)
             elided_ver = painter.fontMetrics().elidedText(
-                app.version, Qt.TextElideMode.ElideRight, VERSION_WIDTH
-            )
+                app.version, Qt.TextElideMode.ElideRight, VERSION_WIDTH)
             painter.drawText(
                 ver_rect,
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
-                elided_ver
-            )
+                elided_ver)
 
-        # 3. Source Badge column (fixed width badge)
         badge_rect = QRect(badge_x, cy - 10, BADGE_WIDTH, 20)
         badge_color = QColor(self.SOURCE_COLORS.get(app.source, "#888888"))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -109,21 +100,26 @@ class AppRowDelegate(QStyledItemDelegate):
         painter.setPen(QColor("white"))
         painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, app.source)
 
-        # 4. App Name column (fills remaining left space, bold, elided)
         if name_max_w > 30:
             name_rect = QRect(rect.left(), rect.top(), name_max_w, rect.height())
             name_font = QFont(option.font)
             name_font.setBold(True)
             painter.setFont(name_font)
             painter.setPen(name_color)
+
+            prefix = ""
+            if app.category == CAT_SYS:
+                prefix = "⚙ "
+            elif app.category == CAT_LIB:
+                prefix = "□ "
+            display = prefix + app.name
+
             elided_name = painter.fontMetrics().elidedText(
-                app.name, Qt.TextElideMode.ElideRight, name_rect.width()
-            )
+                display, Qt.TextElideMode.ElideRight, name_rect.width())
             painter.drawText(
                 name_rect,
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                elided_name
-            )
+                elided_name)
 
         painter.restore()
 
@@ -184,6 +180,10 @@ class MainWindow(QMainWindow):
         self.act_leftovers.triggered.connect(self.scan_leftovers_for_selected)
         tb.addAction(self.act_leftovers)
 
+        self.act_appimage = QAction("Find AppImages", self)
+        self.act_appimage.triggered.connect(self.open_appimage_finder)
+        tb.addAction(self.act_appimage)
+
         self.act_settings = QAction("Settings", self)
         self.act_settings.triggered.connect(self.open_settings)
         tb.addAction(self.act_settings)
@@ -224,6 +224,7 @@ class MainWindow(QMainWindow):
             "Size (largest → smallest)",
             "Size (smallest → largest)",
             "Source, then name",
+            "Category, then name",
         ])
         self.sort_combo.currentIndexChanged.connect(self._refilter)
         ll.addWidget(self.sort_combo)
@@ -257,6 +258,7 @@ class MainWindow(QMainWindow):
         self.d_version = QLabel("—")
         self.d_source  = QLabel("—")
         self.d_size    = QLabel("—")
+        self.d_category = QLabel("—")
         self.d_path    = QLabel("—")
         self.d_path.setWordWrap(True)
         self.d_desc    = QLabel("—")
@@ -264,6 +266,7 @@ class MainWindow(QMainWindow):
         form.addRow("Name:", self.d_name)
         form.addRow("Version:", self.d_version)
         form.addRow("Source:", self.d_source)
+        form.addRow("Category:", self.d_category)
         form.addRow("Size:", self.d_size)
         form.addRow("Install path:", self.d_path)
         form.addRow("Description:", self.d_desc)
@@ -303,7 +306,8 @@ class MainWindow(QMainWindow):
 
     def _busy(self, on: bool):
         self.progress.setVisible(on)
-        for a in (self.act_refresh, self.act_uninstall, self.act_leftovers):
+        for a in (self.act_refresh, self.act_uninstall, self.act_leftovers,
+                  self.act_appimage):
             a.setEnabled(not on)
         self.btn_uninstall.setEnabled(not on)
         self.btn_leftovers.setEnabled(not on)
@@ -324,8 +328,12 @@ class MainWindow(QMainWindow):
     def _on_apps(self, apps):
         self._busy(False)
         self.apps = list(apps)
+        n_app = sum(1 for a in apps if a.category == CAT_APP)
+        n_lib = sum(1 for a in apps if a.category == CAT_LIB)
+        n_sys = sum(1 for a in apps if a.category == CAT_SYS)
+        self.log(f"[refresh] {len(self.apps)} total — "
+                 f"{n_app} apps, {n_lib} libraries, {n_sys} system")
         self._refilter()
-        self.log(f"[refresh] {len(self.apps)} apps total")
 
     def _refilter(self):
         text = self.search.text().lower().strip()
@@ -336,7 +344,7 @@ class MainWindow(QMainWindow):
         for a in self.apps:
             if src != "All sources" and a.source != src:
                 continue
-            if not show_manual and a.source == "Manual":
+            if not show_manual and a.source in ("Manual", "AppImage"):
                 continue
             if text and text not in a.name.lower() and text not in a.package_id.lower():
                 continue
@@ -365,6 +373,9 @@ class MainWindow(QMainWindow):
             return lambda a: (0, (a.size_bytes or 0), a.name.lower())
         if mode == "Source, then name":
             return lambda a: (0, a.source.lower(), a.name.lower())
+        if mode == "Category, then name":
+            order = {CAT_APP: 0, CAT_LIB: 1, CAT_SYS: 2}
+            return lambda a: (order.get(a.category, 3), a.name.lower())
         return lambda a: (0, a.name.lower())
 
     def _on_select(self, cur, _prev):
@@ -377,6 +388,11 @@ class MainWindow(QMainWindow):
         self.d_name.setText(a.name)
         self.d_version.setText(a.version or "—")
         self.d_source.setText(a.source)
+        self.d_category.setText({
+            CAT_APP: "Application",
+            CAT_LIB: "Library / dependency",
+            CAT_SYS: "System package",
+        }.get(a.category, a.category or "—"))
         self.d_size.setText(a.size_human)
         self.d_path.setText(a.install_path or "—")
         self.d_desc.setText(a.description or "—")
@@ -407,7 +423,7 @@ class MainWindow(QMainWindow):
         cmd_text = "\n".join(
             ("sudo " if root else "") + " ".join(cmd) for cmd, root in plan)
 
-        needs_typed = (a.source in ("RPM", "DEB") and
+        needs_typed = (a.source in ("RPM", "DEB", "Pacman") and
                        self.settings.value("require_confirm", True, type=bool))
 
         if needs_typed:
@@ -475,6 +491,13 @@ class MainWindow(QMainWindow):
             dry_run=self.settings.value("dry_run", False, type=bool))
         dlg.exec()
 
+    # ---------------------------------------------------- appimage finder --
+    def open_appimage_finder(self):
+        dlg = AppImageFinderDialog(
+            parent=self,
+            dry_run=self.settings.value("dry_run", False, type=bool))
+        dlg.exec()
+
     # ------------------------------------------------------------ settings --
     def open_settings(self):
         dlg = SettingsDialog(self)
@@ -489,7 +512,7 @@ class MainWindow(QMainWindow):
             self, "About Linclear",
             f"<h3>Linclear {__version__}</h3>"
             "<p>A universal Linux application uninstaller and system cleaner.</p>"
-            "<p>Supports RPM, DEB, Snap, Flatpak, and manually-installed apps.</p>"
+            "<p>Supports RPM, DEB, Pacman, Snap, Flatpak, Nix, Manual, and AppImage.</p>"
             "<p><b>Created by Saimueli</b><br>"
             "<a href='https://github.com/Saimueli'>github.com/Saimueli</a></p>"
             "<p>MIT Licensed.</p>")
