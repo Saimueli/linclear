@@ -1,2 +1,2 @@
 APP_NAME = "Linclear"
-__version__ = "1.1.0"
+__version__ = "1.2.4"
