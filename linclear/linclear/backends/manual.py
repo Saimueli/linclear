@@ -1,17 +1,13 @@
-"""Detects apps not tracked by any package manager.
-
-Sources we look at:
-  * ~/.local/share/applications/*.desktop  (user installs)
-  * /usr/local/share/applications/*.desktop (system manual installs)
-  * Sub-directories of /opt not owned by a package
-  * *.AppImage in ~/Applications, ~/bin, ~/.local/bin, /opt
-  * Executables in ~/.local/bin
-"""
-import os, re, shlex, shutil, subprocess
+"""Detects apps not tracked by any package manager."""
+import os
+import re
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 from typing import List, Tuple, Optional
 from .base import Backend
-from ..models import AppInfo
+from ..models import AppInfo, CAT_APP
 
 HOME = Path.home()
 
@@ -28,6 +24,11 @@ def _file_owned_by_package(path: str) -> bool:
         r = subprocess.run(["rpm", "-qf", path], capture_output=True,
                            text=True, check=False)
         if r.returncode == 0 and "not owned by any package" not in r.stdout:
+            return True
+    if shutil.which("pacman"):
+        r = subprocess.run(["pacman", "-Qo", check], capture_output=True,
+                           text=True, check=False)
+        if r.returncode == 0:
             return True
     return False
 
@@ -72,7 +73,6 @@ class ManualBackend(Backend):
         apps: List[AppInfo] = []
         seen = set()
 
-        # 1. desktop entries in user/usr-local dirs
         for d in (HOME / ".local/share/applications",
                   Path("/usr/local/share/applications")):
             if not d.is_dir():
@@ -96,50 +96,43 @@ class ManualBackend(Backend):
                     name=data["Name"], package_id=f.stem, source=self.source_name,
                     description=data.get("Comment") or "",
                     install_path=target or str(f),
+                    category=CAT_APP,
                     extra={"desktop_file": str(f), "exec": exec_bin},
                 ))
 
-        # 2. /opt sub-directories not owned by a package
         opt = Path("/opt")
         if opt.is_dir():
             for child in opt.iterdir():
                 if not child.is_dir():
                     continue
+                if child.name == "AppImages":
+                    continue  # handled by AppImage backend
                 if _file_owned_by_package(str(child)):
                     continue
                 apps.append(AppInfo(
                     name=child.name, package_id=child.name,
                     source=self.source_name, description="Directory in /opt",
-                    install_path=str(child), extra={"paths": [str(child)]},
+                    install_path=str(child),
+                    category=CAT_APP,
+                    extra={"paths": [str(child)]},
                 ))
 
-        # 3. AppImages
-        for d in (HOME / "Applications", HOME / ".local/bin", HOME / "bin", Path("/opt")):
-            if not d.is_dir():
-                continue
-            for f in d.glob("*.AppImage"):
-                if str(f) in seen:
-                    continue
-                seen.add(str(f))
-                apps.append(AppInfo(
-                    name=f.stem, package_id=f.stem, source=self.source_name,
-                    description="AppImage", install_path=str(f),
-                    extra={"paths": [str(f)]},
-                ))
-
-        # 4. user binaries in ~/.local/bin
         user_bin = HOME / ".local/bin"
         if user_bin.is_dir():
             for f in user_bin.iterdir():
                 if not f.is_file() or not os.access(f, os.X_OK):
                     continue
+                if f.name.endswith(".AppImage"):
+                    continue  # AppImage backend handles these
                 if str(f) in seen:
                     continue
                 seen.add(str(f))
                 apps.append(AppInfo(
                     name=f.name, package_id=f.name, source=self.source_name,
                     description="Executable in ~/.local/bin",
-                    install_path=str(f), extra={"paths": [str(f)]},
+                    install_path=str(f),
+                    category=CAT_APP,
+                    extra={"paths": [str(f)]},
                 ))
 
         return apps
