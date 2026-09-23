@@ -1,7 +1,7 @@
 import subprocess
 from typing import List, Tuple
 from .base import Backend
-from ..models import AppInfo
+from ..models import AppInfo, CAT_APP
 
 
 def _parse_size(s: str) -> int:
@@ -46,6 +46,7 @@ class FlatpakBackend(Backend):
                 source=self.source_name, size_bytes=_parse_size(size_s),
                 description=f"Flatpak ({origin}{', ' + install if install else ''})",
                 install_path=f"/var/lib/flatpak/app/{app_id}",
+                category=CAT_APP,
                 extra={"origin": origin, "installation": install},
             ))
         return apps
