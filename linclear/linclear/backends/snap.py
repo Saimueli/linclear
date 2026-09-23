@@ -1,7 +1,8 @@
-import shutil, subprocess
+import shutil
+import subprocess
 from typing import List, Tuple
 from .base import Backend
-from ..models import AppInfo
+from ..models import AppInfo, CAT_APP
 
 
 class SnapBackend(Backend):
@@ -29,6 +30,7 @@ class SnapBackend(Backend):
                 name=name, package_id=name, version=version,
                 source=self.source_name, description=notes,
                 install_path=f"/snap/{name}",
+                category=CAT_APP,
             ))
         return apps
 
