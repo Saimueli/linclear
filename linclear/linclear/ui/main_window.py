@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QLineEdit,
     QComboBox, QListWidget, QListWidgetItem, QLabel, QPushButton,
-    QPlainTextEdit, QProgressBar, QToolBar, QMessageBox, QInputDialog,
+    QPlainTextEdit, QProgressBar, QToolBar, QMessageBox, QAbstractItemView,
     QFormLayout, QGroupBox, QApplication, QStyledItemDelegate, QStyle,
 )
 from PyQt6.QtCore import Qt, QSettings, QThread, pyqtSignal, QSize, QRect
@@ -19,7 +19,6 @@ from .settings_dialog import SettingsDialog
 from .appimage_dialog import AppImageFinderDialog
 
 
-# ---------------------------------------------------------------- delegate --
 class AppRowDelegate(QStyledItemDelegate):
     SOURCE_COLORS = {
         "RPM":      "#c9624a",
@@ -27,7 +26,6 @@ class AppRowDelegate(QStyledItemDelegate):
         "Pacman":   "#1793d1",
         "Snap":     "#b5651d",
         "Flatpak":  "#4a7ec9",
-        "Nix":      "#5277c3",
         "Manual":   "#6a8c6a",
         "AppImage": "#8a6fc9",
     }
@@ -124,7 +122,6 @@ class AppRowDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-# ----------------------------------------------------------- leftover worker --
 class LeftoverWorker(QThread):
     output = pyqtSignal(str)
     done   = pyqtSignal(list)
@@ -142,7 +139,6 @@ class LeftoverWorker(QThread):
         self.done.emit(items)
 
 
-# --------------------------------------------------------------- main window --
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -161,7 +157,6 @@ class MainWindow(QMainWindow):
         self.log(f"Linclear {__version__} starting…")
         self.refresh()
 
-    # ------------------------------------------------------------- UI setup --
     def _build_ui(self):
         tb = QToolBar("Main")
         tb.setMovable(False)
@@ -200,7 +195,6 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter, 1)
 
-        # -------------------- left pane --------------------
         left = QWidget()
         ll = QVBoxLayout(left)
         ll.setContentsMargins(8, 8, 8, 8)
@@ -230,11 +224,12 @@ class MainWindow(QMainWindow):
         ll.addWidget(self.sort_combo)
 
         self.list = QListWidget()
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.list.setItemDelegate(AppRowDelegate(self.list))
         self.list.setUniformItemSizes(True)
         self.list.setSpacing(0)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.list.currentItemChanged.connect(self._on_select)
+        self.list.itemSelectionChanged.connect(self._on_select)
         ll.addWidget(self.list, 1)
 
         self.count_label = QLabel("0 apps")
@@ -242,7 +237,6 @@ class MainWindow(QMainWindow):
         ll.addWidget(self.count_label)
         splitter.addWidget(left)
 
-        # -------------------- right pane --------------------
         right = QWidget()
         rl = QVBoxLayout(right)
         rl.setContentsMargins(8, 8, 8, 8)
@@ -287,7 +281,6 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
 
-        # -------------------- log --------------------
         log_box = QGroupBox("Log")
         ll2 = QVBoxLayout(log_box)
         self.log_view = QPlainTextEdit()
@@ -300,7 +293,6 @@ class MainWindow(QMainWindow):
         ll2.addWidget(self.progress)
         root.addWidget(log_box, 0)
 
-    # ------------------------------------------------------------- helpers --
     def log(self, msg: str):
         self.log_view.appendPlainText(msg)
 
@@ -316,7 +308,6 @@ class MainWindow(QMainWindow):
         theme = self.settings.value("theme", "Dark")
         apply_theme(QApplication.instance(), dark=(theme != "Light"))
 
-    # ------------------------------------------------------------- listing --
     def refresh(self):
         self.log("[refresh] enumerating installed apps…")
         self._busy(True)
@@ -378,11 +369,37 @@ class MainWindow(QMainWindow):
             return lambda a: (order.get(a.category, 3), a.name.lower())
         return lambda a: (0, a.name.lower())
 
-    def _on_select(self, cur, _prev):
-        if cur is None:
+    def _get_selected_apps(self) -> list[AppInfo]:
+        return [item.data(Qt.ItemDataRole.UserRole) for item in self.list.selectedItems() if item.data(Qt.ItemDataRole.UserRole)]
+
+    def _on_select(self):
+        selected = self._get_selected_apps()
+        if not selected:
             self.current = None
+            self.title_label.setText("Select an application")
+            self.d_name.setText("—")
+            self.d_version.setText("—")
+            self.d_source.setText("—")
+            self.d_category.setText("—")
+            self.d_size.setText("—")
+            self.d_path.setText("—")
+            self.d_desc.setText("—")
             return
-        a: AppInfo = cur.data(Qt.ItemDataRole.UserRole)
+
+        if len(selected) > 1:
+            self.current = selected[0]
+            self.title_label.setText(f"{len(selected)} items selected")
+            self.d_name.setText(f"{len(selected)} packages selected")
+            self.d_version.setText("—")
+            self.d_source.setText("Multiple")
+            self.d_category.setText("—")
+            total_size = sum(a.size_bytes or 0 for a in selected)
+            self.d_size.setText(f"~{total_size / (1024*1024):.1f} MB")
+            self.d_path.setText("—")
+            self.d_desc.setText(", ".join(a.name for a in selected))
+            return
+
+        a = selected[0]
         self.current = a
         self.title_label.setText(a.name)
         self.d_name.setText(a.name)
@@ -397,76 +414,74 @@ class MainWindow(QMainWindow):
         self.d_path.setText(a.install_path or "—")
         self.d_desc.setText(a.description or "—")
 
-    # ----------------------------------------------------------- uninstall --
     def uninstall_selected(self):
-        a = self.current
-        if not a:
-            QMessageBox.information(self, "Linclear", "Select an application first.")
-            return
-        backend = next((b for b in self.backends if b.source_name == a.source), None)
-        if not backend:
-            QMessageBox.warning(self, "Linclear", f"No backend for '{a.source}'")
+        selected_apps = self._get_selected_apps()
+        if not selected_apps:
+            QMessageBox.information(self, "Linclear", "Select at least one application first.")
             return
 
-        plan = backend.plan_uninstall(a)
-        if not plan:
-            QMessageBox.warning(self, "Linclear", "Nothing to uninstall (empty plan).")
-            return
-
-        if safety.is_critical(a.package_id):
+        protected = [a for a in selected_apps if safety.is_critical(a.package_id)]
+        if protected:
+            names = ", ".join(f"'{a.name}'" for a in protected)
             QMessageBox.critical(
-                self, "Protected package",
-                f"'{a.package_id}' is on Linclear's protected list and will not be removed.\n"
-                "Removing it could break your system.")
+                self, "Protected packages",
+                f"The following packages are protected and cannot be uninstalled:\n{names}")
             return
 
-        cmd_text = "\n".join(
-            ("sudo " if root else "") + " ".join(cmd) for cmd, root in plan)
-
-        needs_typed = (a.source in ("RPM", "DEB", "Pacman") and
-                       self.settings.value("require_confirm", True, type=bool))
-
-        if needs_typed:
-            typed, ok = QInputDialog.getText(
-                self, "Confirm uninstall",
-                f"This will uninstall the SYSTEM package '{a.name}'.\n\n"
-                f"Commands:\n{cmd_text}\n\n"
-                f"Type '{a.package_id}' to confirm:")
-            if not ok or typed.strip() != a.package_id:
-                self.log("[abort] confirmation failed")
+        tasks = []
+        for a in selected_apps:
+            backend = next((b for b in self.backends if b.source_name == a.source), None)
+            if not backend:
+                QMessageBox.warning(self, "Linclear", f"No backend found for '{a.source}' ({a.name})")
                 return
+            plan = backend.plan_uninstall(a)
+            if not plan:
+                QMessageBox.warning(self, "Linclear", f"Empty uninstall plan for '{a.name}'.")
+                return
+            tasks.append((a, backend, plan))
+
+        if len(selected_apps) == 1:
+            app = selected_apps[0]
+            cmd_text = "\n".join(("sudo " if root else "") + " ".join(cmd) for cmd, root in tasks[0][2])
+            msg = f"Are you sure you want to uninstall '{app.name}' ({app.source})?\n\nCommands:\n{cmd_text}"
         else:
-            if QMessageBox.question(
-                self, "Confirm uninstall",
-                f"Uninstall '{a.name}' ({a.source})?\n\nCommands:\n{cmd_text}"
-            ) != QMessageBox.StandardButton.Yes:
-                return
+            names_text = "\n".join(f"• {a.name} ({a.source})" for a in selected_apps)
+            msg = f"Are you sure you want to uninstall these {len(selected_apps)} packages?\n\n{names_text}"
+
+        if QMessageBox.question(
+            self, "Confirm uninstall", msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        ) != QMessageBox.StandardButton.Yes:
+            return
 
         dry = self.settings.value("dry_run", False, type=bool)
         if dry:
             self.log("[dry-run] no changes will be made")
 
         self._busy(True)
-        self.log(f"=== Uninstalling {a.name} ({a.source}) ===")
+        self._run_uninstall_queue(tasks, dry)
+
+    def _run_uninstall_queue(self, queue, dry: bool):
+        if not queue:
+            self._busy(False)
+            self.log("=== All uninstalls finished ===")
+            self.refresh()
+            return
+
+        app, backend, _plan = queue[0]
+        self.log(f"=== Uninstalling {app.name} ({app.source}) ===")
+
+        def _on_done(rc):
+            self.log(f"=== Finished {app.name} (rc={rc}) ===")
+            self._run_uninstall_queue(queue[1:], dry)
+
         self._worker = CommandWorker(
-            lambda emit: backend.uninstall(a, emit=emit, dry_run=dry))
+            lambda emit: backend.uninstall(app, emit=emit, dry_run=dry))
         self._worker.output.connect(self.log)
-        self._worker.done.connect(self._on_uninstall_done)
+        self._worker.done.connect(_on_done)
         self._worker.start()
 
-    def _on_uninstall_done(self, rc):
-        self._busy(False)
-        self.log(f"=== Uninstall finished (rc={rc}) ===")
-        target = self.current
-        self.refresh()
-        if target and QMessageBox.question(
-            self, "Scan for leftovers?",
-            "Uninstall finished. Scan for leftover files ('crumbs')?"
-        ) == QMessageBox.StandardButton.Yes:
-            self.current = target
-            self.scan_leftovers_for_selected()
-
-    # ----------------------------------------------------------- leftovers --
     def scan_leftovers_for_selected(self):
         a = self.current
         if not a:
@@ -482,8 +497,7 @@ class MainWindow(QMainWindow):
     def _show_leftovers(self, items):
         self._busy(False)
         if not items:
-            QMessageBox.information(self, "Linclear",
-                                    "No leftover items found. Nice and clean!")
+            QMessageBox.information(self, "Linclear", "No leftover items found. Nice and clean!")
             return
         self.log(f"[leftovers] {len(items)} item(s) found")
         dlg = LeftoversDialog(
@@ -491,14 +505,12 @@ class MainWindow(QMainWindow):
             dry_run=self.settings.value("dry_run", False, type=bool))
         dlg.exec()
 
-    # ---------------------------------------------------- appimage finder --
     def open_appimage_finder(self):
         dlg = AppImageFinderDialog(
             parent=self,
             dry_run=self.settings.value("dry_run", False, type=bool))
         dlg.exec()
 
-    # ------------------------------------------------------------ settings --
     def open_settings(self):
         dlg = SettingsDialog(self)
         if dlg.exec():
@@ -512,7 +524,7 @@ class MainWindow(QMainWindow):
             self, "About Linclear",
             f"<h3>Linclear {__version__}</h3>"
             "<p>A universal Linux application uninstaller and system cleaner.</p>"
-            "<p>Supports RPM, DEB, Pacman, Snap, Flatpak, Nix, Manual, and AppImage.</p>"
+            "<p>Supports RPM, DEB, Pacman, Snap, Flatpak, Manual, and AppImage.</p>"
             "<p><b>Created by Saimueli</b><br>"
             "<a href='https://github.com/Saimueli'>github.com/Saimueli</a></p>"
             "<p>MIT Licensed.</p>")
