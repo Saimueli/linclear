@@ -1,24 +1,24 @@
 # Linclear 🧹
 
-A simple, fast, and lightweight system cleaner for Linux, written in Python. **Linclear** is designed to help you easily manage, detect, and clean application data across your system. It is optimized primarily for **Ubuntu**, **Fedora**, **Arch Linux**, **NixOS**, and their derivatives (Linux Mint, Pop!_OS, Nobara, Manjaro, EndeavourOS, etc.).
+A simple, fast, and lightweight system cleaner for Linux, written in Python. **Linclear** is designed to help you easily manage, detect, and clean application data across your system. It is optimized primarily for **Ubuntu**, **Fedora**, **Arch Linux**, and their derivatives (Linux Mint, Pop!_OS, Nobara, Manjaro, EndeavourOS, etc.).
 
-![Version](https://img.shields.io/badge/version-v1.2.4-blue.svg)
+![Version](https://img.shields.io/badge/version-v1.3.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-orange.svg)
 
-## ✨ Features (v1.2.4)
+## ✨ Features (v1.3.0)
 
+* **Multi-Selection Uninstallation:** Remove multiple applications at once! Use **`Ctrl + Click`** to select specific packages or **`Shift + Click`** to select a range of items for batch removal.
 * **Multi-Format Application Detection:** Scans and identifies applications installed via:
   * **DEB** (Debian / Ubuntu package manager)
   * **RPM** (Fedora / RHEL package manager)
   * **Pacman** (Arch Linux / Manjaro / EndeavourOS)
-  * **Nix** (NixOS and Nix profiles)
   * **Flatpak** packages
   * **Snap** packages
   * **AppImage** files (deep filesystem scan)
   * **Script-based / Manual installs** (custom binary paths and standalone scripts)
 * **System Cleanup:** Quickly locate and remove unnecessary application files and residue.
 * **AppImage Finder:** Deep-scan your system for AppImage files and remove them with one click.
-* **Distro-Friendly:** Built from the ground up for Ubuntu/Debian, Fedora, Arch, and NixOS environments.
+* **Distro-Friendly:** Built from the ground up for Ubuntu/Debian, Fedora, and Arch Linux environments.
 
 ## 🚀 Installation & Usage (AppImage)
 
@@ -29,11 +29,8 @@ The easiest way to run Linclear is via the standalone **AppImage**. No installat
    * **GUI:** Right-click the `.AppImage` file -> **Properties** -> **Permissions** -> Check **"Allow executing file as program"**.
    * **Terminal:**
      ```bash
-     chmod +x Linclear-1.2.4-x86_64.AppImage
+     chmod +x Linclear-1.3.0-x86_64.AppImage
      ```
 3. Run the application by double-clicking it or via terminal:
    ```bash
-   ./Linclear-1.2.4-x86_64.AppImage
-   ```
-
-> **Fedora users:** If you see an error about `libfuse.so.2`, either run `sudo dnf install -y fuse fuse-libs` or launch with `./Linclear-1.2.4-x86_64.AppImage --appimage-extract-and-run`.
+   ./Linclear-1.3.0-x86_64.AppImage
