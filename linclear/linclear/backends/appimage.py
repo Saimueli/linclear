@@ -1,9 +1,3 @@
-"""Find AppImages anywhere on the system.
-
-Unlike the Manual backend (which only looks at fixed install dirs), this
-scans the user's home and common locations, and optionally runs a bounded
-`find` on the whole filesystem so nothing is missed.
-"""
 import os
 import shutil
 import subprocess
@@ -11,10 +5,10 @@ from pathlib import Path
 from typing import List, Tuple
 from .base import Backend
 from ..models import AppInfo, CAT_APP
+from ..privileged import _clean_env
 
 HOME = Path.home()
 
-# Directories we always scan (fast, no `find` needed)
 QUICK_DIRS = [
     HOME / "Applications",
     HOME / "AppImages",
@@ -26,19 +20,14 @@ QUICK_DIRS = [
     Path("/usr/local/bin"),
 ]
 
-# Where we look for the `find` sweep. Root "/" catches everything but is slow;
-# we cap depth and time.
 SWEEP_ROOTS = [HOME, Path("/opt"), Path("/usr/local"), Path("/usr/share")]
 
 
 def _extract_appimage_name(path: Path) -> str:
-    """'Firefox-128.0-x86_64.AppImage' -> 'Firefox'."""
-    stem = path.stem  # strips .AppImage
-    # Strip architecture suffix
+    stem = path.stem
     for suffix in ("-x86_64", "-x86_64.AppImage", "-aarch64", "-arm64", ".x86_64"):
         if stem.lower().endswith(suffix.lower()):
             stem = stem[: -len(suffix)]
-    # Strip version at end (e.g. "-128.0", "-2.10.36")
     parts = stem.rsplit("-", 1)
     if len(parts) == 2 and parts[1] and parts[1][0].isdigit():
         stem = parts[0]
@@ -47,13 +36,12 @@ def _extract_appimage_name(path: Path) -> str:
 
 class AppImageBackend(Backend):
     source_name = "AppImage"
-    command_name = "find"  # always available
+    command_name = "find"
 
     def is_available(self) -> bool:
         return True
 
     def list_apps(self) -> List[AppInfo]:
-        """Quick scan of the standard directories (used on every refresh)."""
         apps: List[AppInfo] = []
         seen: set[str] = set()
 
@@ -100,13 +88,10 @@ class AppImageBackend(Backend):
             extra={"paths": [str(path)]},
         )
 
-    # ---- deep scan (called from the AppImage Finder dialog, in a thread) --
     def deep_scan(self, emit=None) -> List[AppInfo]:
-        """Run a bounded `find` across the user's home and common dirs."""
         apps: List[AppInfo] = []
         seen: set[str] = set()
 
-        # First, the quick scan
         for a in self.list_apps():
             seen.add(a.install_path)
             apps.append(a)
@@ -124,6 +109,7 @@ class AppImageBackend(Backend):
                      "-o", "-iname", "*.appimage", ")",
                      "-perm", "-u+x", "2>/dev/null"],
                     capture_output=True, text=True, timeout=25, check=False,
+                    env=_clean_env(),
                 )
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 continue
