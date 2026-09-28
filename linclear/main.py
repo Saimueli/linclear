@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Linclear — Linux application uninstaller and system cleaner."""
-import sys, os
+import sys
+import os
+
+if "APPDIR" in os.environ:
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt6.QtWidgets import QApplication
