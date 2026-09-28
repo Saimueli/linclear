@@ -1,5 +1,20 @@
-"""Run commands, escalating privileges via pkexec (preferred) or a terminal."""
-import os, shlex, shutil, subprocess
+import os
+import shlex
+import shutil
+import subprocess
+from typing import Callable, List, Optional
+
+
+def _clean_env() -> dict:
+    env = dict(os.environ)
+    for var in ["LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONPATH"]:
+        env.pop(var, None)
+
+    if "LD_LIBRARY_PATH_ORIG" in env:
+        env["LD_LIBRARY_PATH"] = env.pop("LD_LIBRARY_PATH_ORIG")
+
+    return env
+
 
 TERMINALS = [
     ("x-terminal-emulator", ["-e"]),
@@ -18,25 +33,31 @@ def _find_terminal():
     return None, None
 
 
-def _stream(argv, emit):
+def _stream(argv: List[str], emit: Optional[Callable[[str], None]]) -> int:
     if emit:
         emit("$ " + " ".join(shlex.quote(a) for a in argv))
     try:
         proc = subprocess.Popen(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=_clean_env(),
         )
     except FileNotFoundError as e:
         if emit:
             emit(f"[error] {e}")
         return 127
-    for line in proc.stdout:
-        if emit:
-            emit(line.rstrip("\n"))
+    if proc.stdout:
+        for line in proc.stdout:
+            if emit:
+                emit(line.rstrip("\n"))
     return proc.wait()
 
 
-def run_command(argv, emit=None, privileged=False, dry_run=False):
+def run_command(argv: List[str], emit: Optional[Callable[[str], None]] = None,
+                privileged: bool = False, dry_run: bool = False) -> int:
     if dry_run:
         prefix = "sudo " if privileged else ""
         if emit:
@@ -46,7 +67,6 @@ def run_command(argv, emit=None, privileged=False, dry_run=False):
     if not privileged:
         return _stream(argv, emit)
 
-    # resolve absolute path so pkexec's restricted PATH can still find it
     if argv and not os.path.isabs(argv[0]):
         resolved = shutil.which(argv[0])
         if resolved:
