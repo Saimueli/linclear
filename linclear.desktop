@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Linclear
+GenericName=System Cleaner
+Comment=Universal uninstaller and system cleaner for Linux
+Exec=linclear
+Icon=linclear
+Terminal=false
+StartupNotify=true
+Categories=System;PackageManager;Utility;
+Keywords=uninstall;clean;remove;package;appimage;flatpak;snap;
+X-AppImage-Version=1.4.0
