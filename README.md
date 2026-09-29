@@ -1,36 +1,50 @@
-# Linclear 🧹
+# Linclear
 
-A simple, fast, and lightweight system cleaner for Linux, written in Python. **Linclear** is designed to help you easily manage, detect, and clean application data across your system. It is optimized primarily for **Ubuntu**, **Fedora**, **Arch Linux**, and their derivatives (Linux Mint, Pop!_OS, Nobara, Manjaro, EndeavourOS, etc.).
+**Universal uninstaller and system cleaner for Linux — shipped as a single AppImage.**
 
-![Version](https://img.shields.io/badge/version-v1.3.0-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Linux-orange.svg)
+Linclear discovers *everything* installed on your machine and lets you remove it
+from one place, with a fast, modern dark UI.
 
-## ✨ Features (v1.3.0)
+Current version: **1.4.0**
 
-* **Multi-Selection Uninstallation:** Remove multiple applications at once! Use **`Ctrl + Click`** to select specific packages or **`Shift + Click`** to select a range of items for batch removal.
-* **Multi-Format Application Detection:** Scans and identifies applications installed via:
-  * **DEB** (Debian / Ubuntu package manager)
-  * **RPM** (Fedora / RHEL package manager)
-  * **Pacman** (Arch Linux / Manjaro / EndeavourOS)
-  * **Flatpak** packages
-  * **Snap** packages
-  * **AppImage** files (deep filesystem scan)
-  * **Script-based / Manual installs** (custom binary paths and standalone scripts)
-* **System Cleanup:** Quickly locate and remove unnecessary application files and residue.
-* **AppImage Finder:** Deep-scan your system for AppImage files and remove them with one click.
-* **Distro-Friendly:** Built from the ground up for Ubuntu/Debian, Fedora, and Arch Linux environments.
+## Supported sources
 
-## 🚀 Installation & Usage (AppImage)
+| Source     | Discovery                          | Removal                          |
+|------------|------------------------------------|----------------------------------|
+| DEB        | `dpkg-query`                       | `apt-get remove` / `dpkg --purge`|
+| RPM        | `rpm -qa`                          | `dnf remove` / `rpm -e`          |
+| Pacman     | `pacman -Qi`                       | `pacman -Rns`                    |
+| Snap       | `snap list`                        | `snap remove`                    |
+| Flatpak    | `flatpak list --app`               | `flatpak uninstall`              |
+| AppImage   | directory scan + deep `find`       | `rm` (with elevation if needed)  |
+| Manual     | `.desktop` files not package-owned | `rm`                             |
 
-The easiest way to run Linclear is via the standalone **AppImage**. No installation or additional dependencies required!
+## Features
 
-1. Download the latest `.AppImage` from the [Releases](https://github.com/Saimueli/linclear/releases) section.
-2. Grant execution permissions:
-   * **GUI:** Right-click the `.AppImage` file -> **Properties** -> **Permissions** -> Check **"Allow executing file as program"**.
-   * **Terminal:**
-     ```bash
-     chmod +x Linclear-1.3.0-x86_64.AppImage
-     ```
-3. Run the application by double-clicking it or via terminal:
-   ```bash
-   ./Linclear-1.3.0-x86_64.AppImage
+- Real-time search, source filter, sort by name / size / source
+- Multi-selection (Ctrl+Click, Shift+Click) for batch uninstall
+- Detail panel with full package information
+- Log panel + progress bar for every operation
+- **AppImage Finder** with a deep scan of `$HOME`, `/opt`, `/usr/local`, `/usr/share`
+- **Leftover scanner** for `~/.config`, `~/.local/share`, `~/.cache`,
+  `~/.local/bin`, `/etc`, `/var/lib`, `/opt` + broken symlink detection
+- Safety blacklist — system-critical packages can never be removed
+- Privilege escalation via `pkexec`, with a terminal fallback
+  (`gnome-terminal`, `konsole`, `xfce4-terminal`, `xterm`)
+- Every command is shown to you **before** it runs
+
+## Requirements
+
+- Python 3.11+
+- PyQt6
+- `linuxdeploy` + `linuxdeploy-plugin-qt` (downloaded automatically by the build script)
+- `curl` **or** `wget`
+
+## Build
+
+```bash
+cd linclear/
+python3 -m venv .venv
+source .venv/bin/activate
+pip install PyQt6 pyinstaller
+./build_appimage.sh
