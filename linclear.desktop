@@ -10,4 +10,4 @@ Terminal=false
 StartupNotify=true
 Categories=System;PackageManager;Utility;
 Keywords=uninstall;clean;remove;package;appimage;flatpak;snap;
-X-AppImage-Version=1.4.0
+X-AppImage-Version=1.5.0
