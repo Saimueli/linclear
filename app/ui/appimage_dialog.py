@@ -27,8 +27,6 @@ class AppImageDialog(QDialog):
         self._build_ui()
         self.scan(deep=False)
 
-    # ------------------------------------------------------------------ UI
-
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -83,26 +81,20 @@ class AppImageDialog(QDialog):
 
         layout.addLayout(buttons)
 
-    # ------------------------------------------------------------------ log
-
     def log(self, text: str):
         if text is None:
             return
         self.log_view.appendPlainText(str(text))
-
-    # ------------------------------------------------------------------ scan
 
     def scan(self, deep: bool = False):
         self.list_widget.clear()
         self.progress.setRange(0, 0)
         self.log("Scanning for AppImages…" if not deep else "Deep scanning…")
 
-        fn = backends.find_appimages_deep if deep else None
-
-        if fn is None:
-            self._on_scan_done(backends.find_appimages_deep.__wrapped__
-                               if hasattr(backends.find_appimages_deep, "__wrapped__") else None)
-            return
+        if deep:
+            fn = backends.find_appimages_deep
+        else:
+            fn = lambda: [a.path for a in backends.list_appimage()]
 
         worker = FunctionWorker(fn)
         worker.done.connect(self._on_scan_done)
@@ -133,8 +125,6 @@ class AppImageDialog(QDialog):
         self.progress.setValue(0)
         self.log(f"Scan failed: {message}")
 
-    # ------------------------------------------------------------------ add
-
     def _on_add(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select an AppImage", os.path.expanduser("~"),
@@ -151,8 +141,6 @@ class AppImageDialog(QDialog):
         item.setData(Qt.ItemDataRole.UserRole, path)
         self.list_widget.addItem(item)
         self.log(f"Added {path}")
-
-    # ------------------------------------------------------------------ delete
 
     def _on_delete(self):
         items = self.list_widget.selectedItems()
