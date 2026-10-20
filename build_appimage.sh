@@ -5,7 +5,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
 
 APP_NAME="Linclear"
-VERSION="1.4.0"
+VERSION="1.5.0"
 ARCH="$(uname -m)"
 OUT="${APP_NAME}-${VERSION}-${ARCH}.AppImage"
 
