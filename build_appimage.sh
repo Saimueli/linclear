@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Build Linclear-<version>-<arch>.AppImage
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -12,7 +11,26 @@ OUT="${APP_NAME}-${VERSION}-${ARCH}.AppImage"
 
 echo "==> Building ${APP_NAME} ${VERSION} for ${ARCH}"
 
-# ------------------------------------------------------------------ venv
+for f in main.py linclear.spec linclear.desktop linclear.svg AppRun requirements.txt; do
+    if [ ! -f "$f" ]; then
+        echo "ERROR: required file '$f' is missing in $HERE" >&2
+        exit 1
+    fi
+done
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "ERROR: python3 is required." >&2
+    exit 1
+fi
+
+if ! python3 -m venv --help >/dev/null 2>&1; then
+    echo "ERROR: python3-venv is not installed." >&2
+    echo "  Debian/Ubuntu: sudo apt install python3-venv" >&2
+    echo "  Fedora:        sudo dnf install python3" >&2
+    echo "  Arch:          sudo pacman -S python" >&2
+    exit 1
+fi
+
 if [ ! -d ".venv" ]; then
     echo "==> Creating virtualenv (.venv)"
     python3 -m venv .venv
@@ -23,14 +41,11 @@ source ".venv/bin/activate"
 python -m pip install --upgrade pip wheel >/dev/null
 python -m pip install -r requirements.txt pyinstaller
 
-# ------------------------------------------------------------------ clean
 rm -rf build dist AppDir "${OUT}"
 
-# ------------------------------------------------------------------ pyinstaller
 echo "==> Running PyInstaller"
 pyinstaller --noconfirm --clean linclear.spec
 
-# ------------------------------------------------------------------ tools
 mkdir -p tools
 
 fetch() {
@@ -56,14 +71,11 @@ LDQT="$HERE/tools/linuxdeploy-plugin-qt-${ARCH}.AppImage"
 fetch "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${ARCH}.AppImage" "$LD"
 fetch "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-${ARCH}.AppImage" "$LDQT"
 
-# linuxdeploy looks the plugin up by the name "linuxdeploy-plugin-qt" on PATH
-ln -sf "linuxdeploy-plugin-qt-${ARCH}.AppImage" "$HERE/tools/linuxdeploy-plugin-qt"
-chmod +x "$HERE/tools/linuxdeploy-plugin-qt" || true
+ln -sf "linuxdeploy-plugin-qt-${ARCH}.AppImage" "$HERE/tools/linuxdeploy-plugin-qt" || true
 
 export APPIMAGE_EXTRACT_AND_RUN=1
 export PATH="$HERE/tools:$PATH"
 
-# ------------------------------------------------------------------ AppDir
 echo "==> Assembling AppDir"
 rm -rf AppDir
 mkdir -p AppDir/usr/bin
@@ -80,14 +92,12 @@ cp AppRun           AppDir/AppRun
 chmod +x AppDir/AppRun
 chmod +x AppDir/usr/bin/linclear
 
-# ------------------------------------------------------------------ linuxdeploy
 echo "==> Running linuxdeploy"
 if ! "$LD" --appdir AppDir --plugin qt --output appimage; then
     echo "==> linuxdeploy (with Qt plugin) failed - retrying without it"
     "$LD" --appdir AppDir --output appimage
 fi
 
-# ------------------------------------------------------------------ rename
 shopt -s nullglob
 for f in *.AppImage; do
     if [ "$f" != "$OUT" ]; then
