@@ -11,8 +11,6 @@ from .models import AppInfo
 HOME = os.path.expanduser("~")
 
 
-# --------------------------------------------------------------------- utils
-
 def _run(cmd, timeout: int = 90) -> str:
     return privileged.run_capture(cmd, timeout=timeout)
 
@@ -43,8 +41,6 @@ def _file_size(path: str) -> int:
     except OSError:
         return 0
 
-
-# --------------------------------------------------------------------- DEB
 
 def list_deb() -> List[AppInfo]:
     if not privileged.which("dpkg-query"):
@@ -86,8 +82,6 @@ def list_deb() -> List[AppInfo]:
         ))
     return apps
 
-
-# --------------------------------------------------------------------- RPM
 
 def list_rpm() -> List[AppInfo]:
     if not privileged.which("rpm"):
@@ -131,8 +125,6 @@ def list_rpm() -> List[AppInfo]:
     return apps
 
 
-# --------------------------------------------------------------------- Pacman
-
 def _pacman_block(block: dict) -> AppInfo:
     name = block.get("Name", "")
     return AppInfo(
@@ -171,8 +163,6 @@ def list_pacman() -> List[AppInfo]:
     return apps
 
 
-# --------------------------------------------------------------------- Snap
-
 def list_snap() -> List[AppInfo]:
     if not privileged.which("snap"):
         return []
@@ -199,8 +189,6 @@ def list_snap() -> List[AppInfo]:
         ))
     return apps
 
-
-# --------------------------------------------------------------------- Flatpak
 
 def list_flatpak() -> List[AppInfo]:
     if not privileged.which("flatpak"):
@@ -248,8 +236,6 @@ def list_flatpak() -> List[AppInfo]:
     return apps
 
 
-# --------------------------------------------------------------------- AppImage
-
 APPIMAGE_QUICK_DIRS = (
     "~/Applications",
     "~/AppImages",
@@ -264,9 +250,8 @@ APPIMAGE_QUICK_DIRS = (
 
 
 def _strip_appimage_suffix(name: str) -> str:
-    low = name.lower()
-    if low.endswith(".appimage"):
-        return name[: -len(".AppImage")]
+    if name.lower().endswith(".appimage"):
+        return name[:-9]
     return name
 
 
@@ -305,7 +290,6 @@ def list_appimage() -> List[AppInfo]:
 
 
 def find_appimages_deep(timeout: int = 120) -> List[str]:
-    """Deep scan for AppImages in HOME, /opt, /usr/local and /usr/share (depth 6)."""
     roots = [HOME, "/opt", "/usr/local", "/usr/share"]
     found = set()
     for root in roots:
@@ -326,8 +310,6 @@ def find_appimages_deep(timeout: int = 120) -> List[str]:
     return sorted(found)
 
 
-# --------------------------------------------------------------------- Manual
-
 def _dpkg_owned_desktop_files() -> set:
     if not privileged.which("dpkg-query"):
         return set()
@@ -335,8 +317,11 @@ def _dpkg_owned_desktop_files() -> set:
     for pattern in ("/usr/share/applications/*", "/usr/local/share/applications/*"):
         out = _run(["dpkg-query", "-S", pattern], timeout=90)
         for line in out.splitlines():
-            if ":" in line:
-                owned.add(line.split(":", 1)[1].strip())
+            if ":" not in line:
+                continue
+            _pkg, _sep, files_str = line.partition(":")
+            for f in files_str.split():
+                owned.add(f.strip())
     return owned
 
 
@@ -375,7 +360,6 @@ def _parse_desktop(path: str):
 
 
 def list_manual() -> List[AppInfo]:
-    """.desktop files that do not belong to any package manager."""
     has_deb = privileged.which("dpkg-query") is not None
 
     dirs = [
@@ -383,7 +367,6 @@ def list_manual() -> List[AppInfo]:
         "/usr/local/share/applications",
     ]
     if has_deb:
-        # Only scan the system directory when we can tell what is packaged.
         dirs.append("/usr/share/applications")
 
     owned = _dpkg_owned_desktop_files()
@@ -423,8 +406,6 @@ def list_manual() -> List[AppInfo]:
             ))
     return apps
 
-
-# --------------------------------------------------------------------- registry
 
 BACKENDS: List[Tuple[str, Callable[[], List[AppInfo]]]] = [
     ("DEB", list_deb),
